@@ -1,3 +1,4 @@
+# Copyright (c) Aishwarya Kamath & Nicolas Carion. Licensed under the Apache License 2.0. All Rights Reserved
 # Copyright (c) Facebook, Inc. and its affiliates. All Rights Reserved
 """
 Transforms and data augmentation for both image + bbox.
@@ -22,7 +23,7 @@ def crop(image, target, region):
     # should we do something wrt the original size?
     target["size"] = torch.tensor([h, w])
 
-    fields = ["labels", "area", "iscrowd"]
+    fields = ["labels", "area", "iscrowd", "positive_map", "isfinal"]
 
     if "boxes" in target:
         boxes = target["boxes"]
@@ -37,7 +38,7 @@ def crop(image, target, region):
 
     if "masks" in target:
         # FIXME should we update the area here if there are no boxes?
-        target['masks'] = target['masks'][:, i:i + h, j:j + w]
+        target["masks"] = target["masks"][:, i : i + h, j : j + w]
         fields.append("masks")
 
     # remove elements for which the boxes or masks that have zero area
@@ -45,13 +46,14 @@ def crop(image, target, region):
         # favor boxes selection when defining which elements to keep
         # this is compatible with previous implementation
         if "boxes" in target:
-            cropped_boxes = target['boxes'].reshape(-1, 2, 2)
+            cropped_boxes = target["boxes"].reshape(-1, 2, 2)
             keep = torch.all(cropped_boxes[:, 1, :] > cropped_boxes[:, 0, :], dim=1)
         else:
-            keep = target['masks'].flatten(1).any(1)
+            keep = target["masks"].flatten(1).any(1)
 
         for field in fields:
-            target[field] = target[field][keep]
+            if field in target:
+                target[field] = target[field][keep]
 
     return cropped_image, target
 
@@ -68,7 +70,11 @@ def hflip(image, target):
         target["boxes"] = boxes
 
     if "masks" in target:
-        target['masks'] = target['masks'].flip(-1)
+        target["masks"] = target["masks"].flip(-1)
+
+    if "caption" in target:
+        caption = target["caption"].replace("left", "[TMP]").replace("right", "left").replace("[TMP]", "right")
+        target["caption"] = caption
 
     return flipped_image, target
 
@@ -126,8 +132,7 @@ def resize(image, target, size, max_size=None):
     target["size"] = torch.tensor([h, w])
 
     if "masks" in target:
-        target['masks'] = interpolate(
-            target['masks'][:, None].float(), size, mode="nearest")[:, 0] > 0.5
+        target["masks"] = interpolate(target["masks"][:, None].float(), size, mode="nearest")[:, 0] > 0.5
 
     return rescaled_image, target
 
@@ -139,9 +144,9 @@ def pad(image, target, padding):
         return padded_image, None
     target = target.copy()
     # should we do something wrt the original size?
-    target["size"] = torch.tensor(padded_image.size[::-1])
+    target["size"] = torch.tensor(padded_image[::-1])
     if "masks" in target:
-        target['masks'] = torch.nn.functional.pad(target['masks'], (0, padding[0], 0, padding[1]))
+        target["masks"] = torch.nn.functional.pad(target["masks"], (0, padding[0], 0, padding[1]))
     return padded_image, target
 
 
@@ -155,15 +160,22 @@ class RandomCrop(object):
 
 
 class RandomSizeCrop(object):
-    def __init__(self, min_size: int, max_size: int):
+    def __init__(self, min_size: int, max_size: int, respect_boxes: bool = False):
         self.min_size = min_size
         self.max_size = max_size
+        self.respect_boxes = respect_boxes  # if True we can't crop a box out
 
     def __call__(self, img: PIL.Image.Image, target: dict):
-        w = random.randint(self.min_size, min(img.width, self.max_size))
-        h = random.randint(self.min_size, min(img.height, self.max_size))
-        region = T.RandomCrop.get_params(img, [h, w])
-        return crop(img, target, region)
+        init_boxes = len(target["boxes"])
+        max_patience = 100
+        for i in range(max_patience):
+            w = random.randint(self.min_size, min(img.width, self.max_size))
+            h = random.randint(self.min_size, min(img.height, self.max_size))
+            region = T.RandomCrop.get_params(img, [h, w])
+            result_img, result_target = crop(img, target, region)
+            if not self.respect_boxes or len(result_target["boxes"]) == init_boxes or i == max_patience - 1:
+                return result_img, result_target
+        return result_img, result_target
 
 
 class CenterCrop(object):
@@ -173,8 +185,8 @@ class CenterCrop(object):
     def __call__(self, img, target):
         image_width, image_height = img.size
         crop_height, crop_width = self.size
-        crop_top = int(round((image_height - crop_height) / 2.))
-        crop_left = int(round((image_width - crop_width) / 2.))
+        crop_top = int(round((image_height - crop_height) / 2.0))
+        crop_left = int(round((image_width - crop_width) / 2.0))
         return crop(img, target, (crop_top, crop_left, crop_height, crop_width))
 
 
@@ -214,6 +226,7 @@ class RandomSelect(object):
     Randomly selects between transforms1 and transforms2,
     with probability p for transforms1 and (1 - p) for transforms2
     """
+
     def __init__(self, transforms1, transforms2, p=0.5):
         self.transforms1 = transforms1
         self.transforms2 = transforms2
@@ -231,7 +244,6 @@ class ToTensor(object):
 
 
 class RandomErasing(object):
-
     def __init__(self, *args, **kwargs):
         self.eraser = T.RandomErasing(*args, **kwargs)
 
@@ -255,6 +267,22 @@ class Normalize(object):
             boxes = box_xyxy_to_cxcywh(boxes)
             boxes = boxes / torch.tensor([w, h, w, h], dtype=torch.float32)
             target["boxes"] = boxes
+        return image, target
+
+
+class RemoveDifficult(object):
+    def __init__(self, enabled=False):
+        self.remove_difficult = enabled
+
+    def __call__(self, image, target=None):
+        if target is None:
+            return image, None
+        target = target.copy()
+        keep = ~target["iscrowd"].to(torch.bool) | (not self.remove_difficult)
+        if "boxes" in target:
+            target["boxes"] = target["boxes"][keep]
+        target["labels"] = target["labels"][keep]
+        target["iscrowd"] = target["iscrowd"][keep]
         return image, target
 
 

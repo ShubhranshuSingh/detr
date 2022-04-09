@@ -67,14 +67,14 @@ class TransformerEncoder(nn.Module):
         self.num_layers = num_layers
         self.norm = norm
 
-    def forward(self, src,
+    def forward(self, src, txt,
                 mask: Optional[Tensor] = None,
                 src_key_padding_mask: Optional[Tensor] = None,
                 pos: Optional[Tensor] = None):
         output = src
 
         for layer in self.layers:
-            output = layer(output, src_mask=mask,
+            output = layer(output, txt, src_mask=mask,
                            src_key_padding_mask=src_key_padding_mask, pos=pos)
 
         if self.norm is not None:
@@ -134,6 +134,14 @@ class TransformerEncoderLayer(nn.Module):
         self.linear1 = nn.Linear(d_model, dim_feedforward)
         self.dropout = nn.Dropout(dropout)
         self.linear2 = nn.Linear(dim_feedforward, d_model)
+        
+        self.expander_dropout = 0.1
+        self.resizer = FeatureResizer(
+            input_feat_size=786,
+            output_feat_size=d_model,
+            dropout=self.expander_dropout,
+        )
+
 
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
@@ -148,10 +156,12 @@ class TransformerEncoderLayer(nn.Module):
 
     def forward_post(self,
                      src,
+                     txt,
                      src_mask: Optional[Tensor] = None,
                      src_key_padding_mask: Optional[Tensor] = None,
                      pos: Optional[Tensor] = None):
-        q = k = self.with_pos_embed(src, pos)
+        k = self.with_pos_embed(src, pos)
+        q = self.resizer(txt)
         src2 = self.self_attn(q, k, value=src, attn_mask=src_mask,
                               key_padding_mask=src_key_padding_mask)[0]
         src = src + self.dropout1(src2)
@@ -161,12 +171,13 @@ class TransformerEncoderLayer(nn.Module):
         src = self.norm2(src)
         return src
 
-    def forward_pre(self, src,
+    def forward_pre(self, src, txt,
                     src_mask: Optional[Tensor] = None,
                     src_key_padding_mask: Optional[Tensor] = None,
                     pos: Optional[Tensor] = None):
         src2 = self.norm1(src)
-        q = k = self.with_pos_embed(src2, pos)
+        k = self.with_pos_embed(src2, pos)
+        q = self.resizer(txt)
         src2 = self.self_attn(q, k, value=src2, attn_mask=src_mask,
                               key_padding_mask=src_key_padding_mask)[0]
         src = src + self.dropout1(src2)
@@ -175,13 +186,13 @@ class TransformerEncoderLayer(nn.Module):
         src = src + self.dropout2(src2)
         return src
 
-    def forward(self, src,
+    def forward(self, src, txt,
                 src_mask: Optional[Tensor] = None,
                 src_key_padding_mask: Optional[Tensor] = None,
                 pos: Optional[Tensor] = None):
         if self.normalize_before:
-            return self.forward_pre(src, src_mask, src_key_padding_mask, pos)
-        return self.forward_post(src, src_mask, src_key_padding_mask, pos)
+            return self.forward_pre(src, txt, src_mask, src_key_padding_mask, pos)
+        return self.forward_post(src, txt, src_mask, src_key_padding_mask, pos)
 
 
 class TransformerDecoderLayer(nn.Module):
@@ -285,6 +296,26 @@ def build_transformer(args):
         return_intermediate_dec=True,
     )
 
+class FeatureResizer(nn.Module):
+    """
+    This class takes as input a set of embeddings of dimension C1 and outputs a set of
+    embedding of dimension C2, after a linear transformation, dropout and normalization (LN).
+    """
+
+    def __init__(self, input_feat_size, output_feat_size, dropout, do_ln=True):
+        super().__init__()
+        self.do_ln = do_ln
+        # Object feature encoding
+        self.fc = nn.Linear(input_feat_size, output_feat_size, bias=True)
+        self.layer_norm = nn.LayerNorm(output_feat_size, eps=1e-12)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, encoder_features):
+        x = self.fc(encoder_features)
+        if self.do_ln:
+            x = self.layer_norm(x)
+        output = self.dropout(x)
+        return output
 
 def _get_activation_fn(activation):
     """Return an activation function given a string"""

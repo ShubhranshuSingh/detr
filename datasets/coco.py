@@ -10,6 +10,7 @@ import torch
 import torch.utils.data
 import torchvision
 from pycocotools import mask as coco_mask
+import numpy as np
 
 import datasets.transforms as T
 
@@ -45,18 +46,21 @@ class ModulatedDetection(torchvision.datasets.CocoDetection):
 
 
 class CocoDetection(torchvision.datasets.CocoDetection):
-    def __init__(self, img_folder, ann_file, transforms, return_masks):
+    def __init__(self, img_folder, ann_file, transforms, return_masks, embed_loc):
         super(CocoDetection, self).__init__(img_folder, ann_file)
         self._transforms = transforms
         self.prepare = ConvertCocoPolysToMask(return_masks)
+        self.embeddings = torch.Tensor(np.load(embed_loc, allow_pickle=True))
 
     def __getitem__(self, idx):
         img, target = super(CocoDetection, self).__getitem__(idx)
         image_id = self.ids[idx]
+        txt = self.embeddings[idx]
         target = {"image_id": image_id, "annotations": target}
         img, target = self.prepare(img, target)
         if self._transforms is not None:
             img, target = self._transforms(img, target)
+        target['txt'] = txt
         return img, target
 
 
@@ -240,10 +244,10 @@ def make_coco_transforms(image_set, cautious):
 def build(image_set, args):
     root = Path(args.coco_path)
     assert root.exists(), f"provided COCO path {root} does not exist"
-    mode = "instances"
+    mode = "refcoco"
     PATHS = {
-        "train": (root / "train2014", root / "annotations" / f"{mode}_train2014.json"),
-        "val": (root / "val2014", root / "annotations" / f"{mode}_val2014.json"),
+        "train": (root / "train2014", root / f"finetune_{mode}_train.json"),
+        "val": (root / "val2014", root / f"finetune_{mode}_val.json"),
     }
 
     img_folder, ann_file = PATHS[image_set]
@@ -252,5 +256,6 @@ def build(image_set, args):
         ann_file,
         transforms=make_coco_transforms(image_set, False),
         return_masks=args.masks,
+        embed_loc= root/"embedding.npy",
     )
     return dataset

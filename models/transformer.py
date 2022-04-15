@@ -137,7 +137,7 @@ class TransformerEncoderLayer(nn.Module):
         
         self.expander_dropout = 0.1
         self.resizer = FeatureResizer(
-            input_feat_size=786,
+            input_feat_size=768,
             output_feat_size=d_model,
             dropout=self.expander_dropout,
         )
@@ -161,7 +161,9 @@ class TransformerEncoderLayer(nn.Module):
                      src_key_padding_mask: Optional[Tensor] = None,
                      pos: Optional[Tensor] = None):
         k = self.with_pos_embed(src, pos)
-        q = self.resizer(txt)
+        q = self.resizer(txt).unsqueeze(0)
+        from IPython import embed
+        embed()
         src2 = self.self_attn(q, k, value=src, attn_mask=src_mask,
                               key_padding_mask=src_key_padding_mask)[0]
         src = src + self.dropout1(src2)
@@ -177,7 +179,9 @@ class TransformerEncoderLayer(nn.Module):
                     pos: Optional[Tensor] = None):
         src2 = self.norm1(src)
         k = self.with_pos_embed(src2, pos)
-        q = self.resizer(txt)
+        q = self.resizer(txt).unsqueeze(0)
+        from IPython import embed
+        embed()
         src2 = self.self_attn(q, k, value=src2, attn_mask=src_mask,
                               key_padding_mask=src_key_padding_mask)[0]
         src = src + self.dropout1(src2)

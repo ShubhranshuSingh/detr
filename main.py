@@ -140,29 +140,29 @@ def main(args):
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop)
 
     dataset_train = build_dataset(image_set='train', args=args)
-    dataset_val = build_dataset(image_set='val', args=args)
+    # dataset_val = build_dataset(image_set='val', args=args)
 
     if args.distributed:
         sampler_train = DistributedSampler(dataset_train)
-        sampler_val = DistributedSampler(dataset_val, shuffle=False)
+        # sampler_val = DistributedSampler(dataset_val, shuffle=False)
     else:
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
-        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+        # sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
     batch_sampler_train = torch.utils.data.BatchSampler(
         sampler_train, args.batch_size, drop_last=True)
 
     data_loader_train = DataLoader(dataset_train, batch_sampler=batch_sampler_train,
                                    collate_fn=utils.collate_fn, num_workers=args.num_workers)
-    data_loader_val = DataLoader(dataset_val, args.batch_size, sampler=sampler_val,
-                                 drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers)
+    # data_loader_val = DataLoader(dataset_val, args.batch_size, sampler=sampler_val,
+                                #  drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers)
 
     if args.dataset_file == "coco_panoptic":
         # We also evaluate AP during panoptic training, on original coco DS
         coco_val = datasets.coco.build("val", args)
         base_ds = get_coco_api_from_dataset(coco_val)
-    else:
-        base_ds = get_coco_api_from_dataset(dataset_val)
+    # else:
+        #base_ds = get_coco_api_from_dataset(dataset_val)
 
     if args.frozen_weights is not None:
         checkpoint = torch.load(args.frozen_weights, map_location='cpu')
@@ -211,9 +211,9 @@ def main(args):
                     'args': args,
                 }, checkpoint_path)
 
-        test_stats, coco_evaluator = evaluate(
-            model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir
-        )
+        # test_stats, coco_evaluator = evaluate(
+        #     model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir
+        # )
 
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                      **{f'test_{k}': v for k, v in test_stats.items()},
@@ -225,15 +225,15 @@ def main(args):
                 f.write(json.dumps(log_stats) + "\n")
 
             # for evaluation logs
-            if coco_evaluator is not None:
-                (output_dir / 'eval').mkdir(exist_ok=True)
-                if "bbox" in coco_evaluator.coco_eval:
-                    filenames = ['latest.pth']
-                    if epoch % 50 == 0:
-                        filenames.append(f'{epoch:03}.pth')
-                    for name in filenames:
-                        torch.save(coco_evaluator.coco_eval["bbox"].eval,
-                                   output_dir / "eval" / name)
+            # if coco_evaluator is not None:
+            #     (output_dir / 'eval').mkdir(exist_ok=True)
+            #     if "bbox" in coco_evaluator.coco_eval:
+            #         filenames = ['latest.pth']
+            #         if epoch % 50 == 0:
+            #             filenames.append(f'{epoch:03}.pth')
+            #         for name in filenames:
+            #             torch.save(coco_evaluator.coco_eval["bbox"].eval,
+            #                        output_dir / "eval" / name)
 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))

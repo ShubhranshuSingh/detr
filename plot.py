@@ -188,80 +188,44 @@ def main(args):
             utils.save_on_master(coco_evaluator.coco_eval["bbox"].eval, output_dir / "eval.pth")
         return
 
-    print("Start training")
     start_time = time.time()
-    weights = torch.load(args.coco_path + 'detr-r50-e632da11.pth')
+    weights = torch.load('/home/ubuntu/checkpoint.pth')
     weights = weights['model']
-    
-    own_state = model.state_dict()
+    model.load_state_dict(weights)
 
-    for name, param in weights.items():
-        print(name)
-        if name not in own_state:
-            continue
-        if isinstance(param, torch.nn.parameter.Parameter):
-            param = param.data
-        try:
-            print(param.shape)
-            own_state[name].copy_(param)
-            print('Copied {}'.format(name))
-        except:
-            print('Did not find {}'.format(name))
-            continue
-    model.load_state_dict(own_state)
-    for param in model.named_parameters():
-        if param[0].find('resizer') == -1:
-            param[1].requires_grad = False
-    model.query_embed.weight.requires_grad = True
-    for epoch in range(args.start_epoch, args.epochs):
-        if args.distributed:
-            sampler_train.set_epoch(epoch)
-        train_stats = train_one_epoch(
-            model, criterion, data_loader_train, optimizer, device, epoch,
-            args.clip_max_norm)
-        lr_scheduler.step()
-        if args.output_dir:
-            checkpoint_paths = [output_dir / 'checkpoint.pth']
-            # extra checkpoint before LR drop and every 100 epochs
-            if (epoch + 1) % args.lr_drop == 0 or (epoch + 1) % 100 == 0:
-                checkpoint_paths.append(output_dir / f'checkpoint{epoch:04}.pth')
-            for checkpoint_path in checkpoint_paths:
-                utils.save_on_master({
-                    'model': model_without_ddp.state_dict(),
-                    'optimizer': optimizer.state_dict(),
-                    'lr_scheduler': lr_scheduler.state_dict(),
-                    'epoch': epoch,
-                    'args': args,
-                }, checkpoint_path)
+    metric_logger = utils.MetricLogger(delimiter="  ")
+    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
+    metric_logger.add_meter('class_error', utils.SmoothedValue(window_size=1, fmt='{value:.2f}'))
+    header = 'Epoch: [{}]'.format(0)
+    print_freq = 100
 
-        # test_stats, coco_evaluator = evaluate(
-        #     model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir
-        # )
+    for samples, targets in metric_logger.log_every(data_loader_train, print_freq, header):
+        samples = samples.to(device)
 
-        log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-                    #  **{f'test_{k}': v for k, v in test_stats.items()},
-                     'epoch': epoch,
-                     'n_parameters': n_parameters}
+        new_targets = []
+        txt = []
+        for t in targets:
+            dic = {}
+            for k, v in t.items():
+                if k != 'txt': 
+                    dic[k] = v.to(device)
+            new_targets.append(dic)
+            txt.append(t['txt'])
+        txt = torch.stack(txt).to(device)
+        targets = new_targets
 
-        if args.output_dir and utils.is_main_process():
-            with (output_dir / "log.txt").open("a") as f:
-                f.write(json.dumps(log_stats) + "\n")
+        outputs = model(samples, txt)
 
-            # for evaluation logs
-            # if coco_evaluator is not None:
-            #     (output_dir / 'eval').mkdir(exist_ok=True)
-            #     if "bbox" in coco_evaluator.coco_eval:
-            #         filenames = ['latest.pth']
-            #         if epoch % 50 == 0:
-            #             filenames.append(f'{epoch:03}.pth')
-            #         for name in filenames:
-            #             torch.save(coco_evaluator.coco_eval["bbox"].eval,
-            #                        output_dir / "eval" / name)
+        break # Just use first batch for visualization purpose
+    import matplotlib.pyplot as plt
+    import matplotlib.patches as patches
 
-    total_time = time.time() - start_time
-    total_time_str = str(datetime.timedelta(seconds=int(total_time)))
-    print('Training time {}'.format(total_time_str))
+    # Use patches.Rectangle - https://stackoverflow.com/questions/37435369/matplotlib-how-to-draw-a-rectangle-on-image
 
+    # Use following variables to plot gt box and predicted box
+    img, masks = samples.decompose() # Read Nested Tensor class in utils/misc.py
+    gt = targets
+    preds = outputs
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('DETR training and evaluation script', parents=[get_args_parser()])

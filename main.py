@@ -190,6 +190,29 @@ def main(args):
 
     print("Start training")
     start_time = time.time()
+    weights = torch.load(args.coco_path + 'detr-r50-e632da11.pth')
+    weights = weights['model']
+    
+    own_state = model.state_dict()
+
+    for name, param in weights.items():
+        print(name)
+        if name not in own_state:
+            continue
+        if isinstance(param, torch.nn.parameter.Parameter):
+            param = param.data
+        try:
+            print(param.shape)
+            own_state[name].copy_(param)
+            print('Copied {}'.format(name))
+        except:
+            print('Did not find {}'.format(name))
+            continue
+    model.load_state_dict(own_state)
+    for param in model.named_parameters():
+        if param[0].find('resizer') == -1:
+            param[1].requires_grad = False
+    model.query_embed.weight.requires_grad = True
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             sampler_train.set_epoch(epoch)

@@ -15,6 +15,8 @@ import util.misc as utils
 from datasets import build_dataset, get_coco_api_from_dataset
 from engine import evaluate, train_one_epoch
 from models import build_model
+from PIL import Image
+import json
 
 
 def get_args_parser():
@@ -189,7 +191,7 @@ def main(args):
         return
 
     start_time = time.time()
-    weights = torch.load('/home/ubuntu/checkpoint.pth')
+    weights = torch.load('/home/ubuntu/data/checkpoint.pth')
     weights = weights['model']
     model.load_state_dict(weights)
 
@@ -199,7 +201,9 @@ def main(args):
     header = 'Epoch: [{}]'.format(0)
     print_freq = 100
 
-    for samples, targets in metric_logger.log_every(data_loader_train, print_freq, header):
+    annotations = json.load(open('/home/ubuntu/data/finetune_refcoco_train.json'))
+    
+    for idx, (samples, targets) in enumerate(data_loader_train):
         samples = samples.to(device)
 
         new_targets = []
@@ -215,17 +219,47 @@ def main(args):
         targets = new_targets
 
         outputs = model(samples, txt)
-
-        break # Just use first batch for visualization purpose
+        if idx == 1:
+            break
     import matplotlib.pyplot as plt
     import matplotlib.patches as patches
 
     # Use patches.Rectangle - https://stackoverflow.com/questions/37435369/matplotlib-how-to-draw-a-rectangle-on-image
 
     # Use following variables to plot gt box and predicted box
-    img, masks = samples.decompose() # Read Nested Tensor class in utils/misc.py
-    gt = targets
+    #img, masks = samples.decompose() # Read Nested Tensor class in utils/misc.py
+    i = 1
+    gt = targets[i]['boxes']
     preds = outputs
+
+    image_id = targets[i]['image_id'].item()
+    file_name = annotations['images'][image_id]['file_name']
+    print('Question:', annotations['images'][image_id]['caption'])
+
+    # import IPython
+    # IPython.embed()
+    img = Image.open('/home/ubuntu/data/train2014/'+file_name)
+
+    gt = gt[0].cpu().numpy()
+    h, w = targets[i]['orig_size'].cpu().numpy()
+    gt = gt*np.array([w, h , w, h])
+    lowx, lowy = (gt[0] - gt[2]/2, gt[1] - gt[3]/2)
+    r = patches.Rectangle((lowx, lowy), gt[2], gt[3], linewidth=1, edgecolor='r', facecolor='none')
+    fig, ax = plt.subplots()
+    ax.matshow(img)
+    ax.add_patch(r)
+    plt.savefig('out.png')
+    plt.cla()
+
+    gt = preds['pred_boxes'][i]
+    gt = gt[0].detach().cpu().numpy()
+    gt = gt*np.array([w, h , w, h])
+    lowx, lowy = (gt[0] - gt[2]/2, gt[1] - gt[3]/2)
+    r = patches.Rectangle((lowx, lowy), gt[2], gt[3], linewidth=1, edgecolor='r', facecolor='none')
+    fig, ax = plt.subplots()
+    ax.matshow(img)
+    ax.add_patch(r)
+    plt.savefig('out_pred.png')
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('DETR training and evaluation script', parents=[get_args_parser()])

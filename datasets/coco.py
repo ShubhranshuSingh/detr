@@ -247,7 +247,7 @@ def build(image_set, args):
     mode = "refcoco"
     PATHS = {
         "train": (root / "train2014", root / f"finetune_{mode}_train.json"),
-        "val": (root / "val2014", root / f"finetune_{mode}_val.json"),
+        "val": (root / "train2014", root / f"finetune_{mode}_val.json"),
     }
 
     img_folder, ann_file = PATHS[image_set]
@@ -256,6 +256,6 @@ def build(image_set, args):
         ann_file,
         transforms=make_coco_transforms(image_set, False),
         return_masks=args.masks,
-        embed_loc= root/"embedding.npy",
+        embed_loc= root/f"embedding_{image_set}.npy",
     )
     return dataset

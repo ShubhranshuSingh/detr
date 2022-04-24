@@ -12,11 +12,12 @@ import torch
 import util.misc as utils
 from datasets.coco_eval import CocoEvaluator
 from datasets.panoptic_eval import PanopticEvaluator
+from torch.utils.tensorboard import SummaryWriter
 
 
 def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     data_loader: Iterable, optimizer: torch.optim.Optimizer,
-                    device: torch.device, epoch: int, max_norm: float = 0):
+                    device: torch.device, epoch: int, max_norm: float = 0, writer:SummaryWriter = None):
     model.train()
     criterion.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
@@ -72,11 +73,15 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
     print("Averaged stats:", metric_logger)
+    writer.add_scalar('Train/loss', metric_logger.meters['loss'].avg, epoch)
+    writer.add_scalar('Train/loss_ce', metric_logger.meters['loss_ce'].avg, epoch)
+    writer.add_scalar('Train/loss_bbox', metric_logger.meters['loss_bbox'].avg, epoch)
+    writer.add_scalar('Train/loss_giou', metric_logger.meters['loss_giou'].avg, epoch)
     return {k: meter.global_avg for k, meter in metric_logger.meters.items()}
 
 
 @torch.no_grad()
-def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, output_dir):
+def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, output_dir, summary:SummaryWriter):
     model.eval()
     criterion.eval()
 
@@ -98,9 +103,19 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
 
     for samples, targets in metric_logger.log_every(data_loader, 10, header):
         samples = samples.to(device)
-        targets = [{k: v.to(device) for k, v in t.items()} for t in targets]
+        new_targets = []
+        txt = []
+        for t in targets:
+            dic = {}
+            for k, v in t.items():
+                if k != 'txt': 
+                    dic[k] = v.to(device)
+            new_targets.append(dic)
+            txt.append(t['txt'])
+        txt = torch.stack(txt).to(device)
+        targets = new_targets
 
-        outputs = model(samples, targets['txt'])
+        outputs = model(samples, txt)
         loss_dict = criterion(outputs, targets)
         weight_dict = criterion.weight_dict
 
@@ -146,6 +161,23 @@ def evaluate(model, criterion, postprocessors, data_loader, base_ds, device, out
     if coco_evaluator is not None:
         coco_evaluator.accumulate()
         coco_evaluator.summarize()
+
+    ap_ar = coco_evaluator.coco_eval['bbox'].stats
+
+    summary.add_scalar('Val/Average Precision  (AP) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ]', ap_ar[0])
+    summary.add_scalar('Val/Average Precision  (AP) @[ IoU=0.50      | area=   all | maxDets=100 ]', ap_ar[1])
+    summary.add_scalar('Val/Average Precision  (AP) @[ IoU=0.75      | area=   all | maxDets=100 ]', ap_ar[2])
+    summary.add_scalar('Val/Average Precision  (AP) @[ IoU=0.50:0.95 | area= small | maxDets=100 ]', ap_ar[3])
+    summary.add_scalar('Val/Average Precision  (AP) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ]', ap_ar[4])
+    summary.add_scalar('Val/Average Precision  (AP) @[ IoU=0.50:0.95 | area= large | maxDets=100 ]', ap_ar[5])
+    
+    summary.add_scalar('Val/Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=  1 ]', ap_ar[6])
+    summary.add_scalar('Val/Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets= 10 ]', ap_ar[7])
+    summary.add_scalar('Val/Average Recall     (AR) @[ IoU=0.50:0.95 | area=   all | maxDets=100 ]', ap_ar[8])
+    summary.add_scalar('Val/Average Recall     (AR) @[ IoU=0.50:0.95 | area= small | maxDets=100 ]', ap_ar[9])
+    summary.add_scalar('Val/Average Recall     (AR) @[ IoU=0.50:0.95 | area=medium | maxDets=100 ]', ap_ar[10])
+    summary.add_scalar('Val/Average Recall     (AR) @[ IoU=0.50:0.95 | area= large | maxDets=100 ]', ap_ar[11])
+
     panoptic_res = None
     if panoptic_evaluator is not None:
         panoptic_res = panoptic_evaluator.summarize()

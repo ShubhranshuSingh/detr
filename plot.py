@@ -142,22 +142,22 @@ def main(args):
     lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, args.lr_drop)
 
     dataset_train = build_dataset(image_set='train', args=args)
-    # dataset_val = build_dataset(image_set='val', args=args)
+    dataset_val = build_dataset(image_set='val', args=args)
 
     if args.distributed:
         sampler_train = DistributedSampler(dataset_train)
-        # sampler_val = DistributedSampler(dataset_val, shuffle=False)
+        sampler_val = DistributedSampler(dataset_val, shuffle=False)
     else:
         sampler_train = torch.utils.data.RandomSampler(dataset_train)
-        # sampler_val = torch.utils.data.SequentialSampler(dataset_val)
+        sampler_val = torch.utils.data.SequentialSampler(dataset_val)
 
     batch_sampler_train = torch.utils.data.BatchSampler(
         sampler_train, args.batch_size, drop_last=True)
 
     data_loader_train = DataLoader(dataset_train, batch_sampler=batch_sampler_train,
                                    collate_fn=utils.collate_fn, num_workers=args.num_workers)
-    # data_loader_val = DataLoader(dataset_val, args.batch_size, sampler=sampler_val,
-                                #  drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers)
+    data_loader_val = DataLoader(dataset_val, args.batch_size, sampler=sampler_val,
+                                 drop_last=False, collate_fn=utils.collate_fn, num_workers=args.num_workers)
 
     if args.dataset_file == "coco_panoptic":
         # We also evaluate AP during panoptic training, on original coco DS
@@ -191,7 +191,7 @@ def main(args):
         return
 
     start_time = time.time()
-    weights = torch.load('/home/ubuntu/data/checkpoint.pth')
+    weights = torch.load('/home/ubuntu/data/logs/checkpoint.pth')
     weights = weights['model']
     model.load_state_dict(weights)
 
@@ -201,9 +201,9 @@ def main(args):
     header = 'Epoch: [{}]'.format(0)
     print_freq = 100
 
-    annotations = json.load(open('/home/ubuntu/data/finetune_refcoco_train.json'))
+    annotations = json.load(open('/home/ubuntu/data/finetune_refcoco_val.json'))
     
-    for idx, (samples, targets) in enumerate(data_loader_train):
+    for idx, (samples, targets) in enumerate(data_loader_val):
         samples = samples.to(device)
 
         new_targets = []
@@ -219,7 +219,7 @@ def main(args):
         targets = new_targets
 
         outputs = model(samples, txt)
-        if idx == 1:
+        if idx == 19: # Train ids - 15, 10, 21, 22 # Val ids 3, 7, 10
             break
     import matplotlib.pyplot as plt
     import matplotlib.patches as patches
@@ -232,7 +232,7 @@ def main(args):
     gt = targets[i]['boxes']
     preds = outputs
 
-    image_id = targets[i]['image_id'].item()
+    image_id = targets[i]['image_id'].item() - 120624
     file_name = annotations['images'][image_id]['file_name']
     print('Question:', annotations['images'][image_id]['caption'])
 

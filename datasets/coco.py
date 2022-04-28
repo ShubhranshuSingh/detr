@@ -254,7 +254,7 @@ def build(image_set, args):
     dataset = CocoDetection(
         img_folder,
         ann_file,
-        transforms=make_coco_transforms(image_set, False),
+        transforms=make_coco_transforms(image_set, True),
         return_masks=args.masks,
         embed_loc= root/f"embedding_{image_set}.npy",
     )

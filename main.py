@@ -238,11 +238,11 @@ def main(args):
                 }, checkpoint_path)
 
         test_stats, coco_evaluator = evaluate(
-            model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir, writer
+            model, criterion, postprocessors, data_loader_val, base_ds, device, args.output_dir, writer, epoch
         )
 
         log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
-                    #  **{f'test_{k}': v for k, v in test_stats.items()},
+                     **{f'test_{k}': v for k, v in test_stats.items()},
                      'epoch': epoch,
                      'n_parameters': n_parameters}
 

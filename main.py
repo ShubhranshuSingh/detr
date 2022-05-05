@@ -211,7 +211,7 @@ def main(args):
             continue
     model.load_state_dict(own_state)
     for param in model.named_parameters():
-        if param[0].find('resizer') == -1:
+        if param[0].find('encoder') == -1:
             param[1].requires_grad = False
     model.query_embed.weight.requires_grad = True
 

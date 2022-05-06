@@ -73,9 +73,13 @@ class TransformerEncoder(nn.Module):
                 pos: Optional[Tensor] = None):
         output = src
 
-        for layer in self.layers:
-            output = layer(output, txt, src_mask=mask,
+        for idx, layer in enumerate(self.layers):
+            if idx < 3:
+                output = layer(output, txt, src_mask=mask,
                            src_key_padding_mask=src_key_padding_mask, pos=pos)
+            else:
+                output = layer(output, txt, src_mask=mask,
+                           src_key_padding_mask=src_key_padding_mask, pos=pos, is_cross = True)
 
         if self.norm is not None:
             output = self.norm(output)
@@ -159,9 +163,13 @@ class TransformerEncoderLayer(nn.Module):
                      txt,
                      src_mask: Optional[Tensor] = None,
                      src_key_padding_mask: Optional[Tensor] = None,
-                     pos: Optional[Tensor] = None):
+                     pos: Optional[Tensor] = None,
+                     is_cross = False):
         k = self.with_pos_embed(src, pos)
-        q = self.resizer(txt).unsqueeze(0)
+        if is_cross:
+            q = self.resizer(txt).unsqueeze(0)
+        else:
+            q = k
         src2 = self.self_attn(q, k, value=src, attn_mask=src_mask,
                               key_padding_mask=src_key_padding_mask)[0]
         src = src + self.dropout1(src2)
@@ -174,10 +182,14 @@ class TransformerEncoderLayer(nn.Module):
     def forward_pre(self, src, txt,
                     src_mask: Optional[Tensor] = None,
                     src_key_padding_mask: Optional[Tensor] = None,
-                    pos: Optional[Tensor] = None):
+                    pos: Optional[Tensor] = None,
+                    is_cross = False):
         src2 = self.norm1(src)
         k = self.with_pos_embed(src2, pos)
-        q = self.resizer(txt).unsqueeze(0)
+        if is_cross:
+            q = self.resizer(txt).unsqueeze(0)
+        else:
+            q = k
         src2 = self.self_attn(q, k, value=src2, attn_mask=src_mask,
                               key_padding_mask=src_key_padding_mask)[0]
         src = src + self.dropout1(src2)
@@ -189,10 +201,11 @@ class TransformerEncoderLayer(nn.Module):
     def forward(self, src, txt,
                 src_mask: Optional[Tensor] = None,
                 src_key_padding_mask: Optional[Tensor] = None,
-                pos: Optional[Tensor] = None):
+                pos: Optional[Tensor] = None,
+                is_cross = False):
         if self.normalize_before:
-            return self.forward_pre(src, txt, src_mask, src_key_padding_mask, pos)
-        return self.forward_post(src, txt, src_mask, src_key_padding_mask, pos)
+            return self.forward_pre(src, txt, src_mask, src_key_padding_mask, pos, is_cross)
+        return self.forward_post(src, txt, src_mask, src_key_padding_mask, pos, is_cross)
 
 
 class TransformerDecoderLayer(nn.Module):

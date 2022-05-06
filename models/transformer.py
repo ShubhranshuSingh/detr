@@ -44,7 +44,7 @@ class Transformer(nn.Module):
             if p.dim() > 1:
                 nn.init.xavier_uniform_(p)
 
-    def forward(self, src, txt, mask, query_embed, pos_embed):
+    def forward(self, src, mask, query_embed, pos_embed, txt):
         # flatten NxCxHxW to HWxNxC
         bs, c, h, w = src.shape
         src = src.flatten(2).permute(2, 0, 1)
@@ -52,8 +52,8 @@ class Transformer(nn.Module):
         query_embed = query_embed.unsqueeze(1).repeat(1, bs, 1)
         mask = mask.flatten(1)
 
-        tgt = torch.zeros_like(query_embed)
-        memory = self.encoder(src, txt, src_key_padding_mask=mask, pos=pos_embed)
+        tgt = txt.unsqueeze(0)
+        memory = self.encoder(src, src_key_padding_mask=mask, pos=pos_embed)
         hs = self.decoder(tgt, memory, memory_key_padding_mask=mask,
                           pos=pos_embed, query_pos=query_embed)
         return hs.transpose(1, 2), memory.permute(1, 2, 0).view(bs, c, h, w)
@@ -67,14 +67,14 @@ class TransformerEncoder(nn.Module):
         self.num_layers = num_layers
         self.norm = norm
 
-    def forward(self, src, txt,
+    def forward(self, src,
                 mask: Optional[Tensor] = None,
                 src_key_padding_mask: Optional[Tensor] = None,
                 pos: Optional[Tensor] = None):
         output = src
 
         for layer in self.layers:
-            output = layer(output, txt, src_mask=mask,
+            output = layer(output, src_mask=mask,
                            src_key_padding_mask=src_key_padding_mask, pos=pos)
 
         if self.norm is not None:
@@ -135,14 +135,6 @@ class TransformerEncoderLayer(nn.Module):
         self.dropout = nn.Dropout(dropout)
         self.linear2 = nn.Linear(dim_feedforward, d_model)
         
-        self.expander_dropout = 0.1
-        self.resizer = FeatureResizer(
-            input_feat_size=768,
-            output_feat_size=d_model,
-            dropout=self.expander_dropout,
-        )
-
-
         self.norm1 = nn.LayerNorm(d_model)
         self.norm2 = nn.LayerNorm(d_model)
         self.dropout1 = nn.Dropout(dropout)
@@ -156,12 +148,10 @@ class TransformerEncoderLayer(nn.Module):
 
     def forward_post(self,
                      src,
-                     txt,
                      src_mask: Optional[Tensor] = None,
                      src_key_padding_mask: Optional[Tensor] = None,
                      pos: Optional[Tensor] = None):
-        k = self.with_pos_embed(src, pos)
-        q = self.resizer(txt).unsqueeze(0)
+        q = k = self.with_pos_embed(src, pos)
         src2 = self.self_attn(q, k, value=src, attn_mask=src_mask,
                               key_padding_mask=src_key_padding_mask)[0]
         src = src + self.dropout1(src2)
@@ -171,13 +161,12 @@ class TransformerEncoderLayer(nn.Module):
         src = self.norm2(src)
         return src
 
-    def forward_pre(self, src, txt,
+    def forward_pre(self, src,
                     src_mask: Optional[Tensor] = None,
                     src_key_padding_mask: Optional[Tensor] = None,
                     pos: Optional[Tensor] = None):
         src2 = self.norm1(src)
-        k = self.with_pos_embed(src2, pos)
-        q = self.resizer(txt).unsqueeze(0)
+        q = k = self.with_pos_embed(src2, pos)
         src2 = self.self_attn(q, k, value=src2, attn_mask=src_mask,
                               key_padding_mask=src_key_padding_mask)[0]
         src = src + self.dropout1(src2)
@@ -186,13 +175,13 @@ class TransformerEncoderLayer(nn.Module):
         src = src + self.dropout2(src2)
         return src
 
-    def forward(self, src, txt,
+    def forward(self, src,
                 src_mask: Optional[Tensor] = None,
                 src_key_padding_mask: Optional[Tensor] = None,
                 pos: Optional[Tensor] = None):
         if self.normalize_before:
-            return self.forward_pre(src, txt, src_mask, src_key_padding_mask, pos)
-        return self.forward_post(src, txt, src_mask, src_key_padding_mask, pos)
+            return self.forward_pre(src, src_mask, src_key_padding_mask, pos)
+        return self.forward_post(src, src_mask, src_key_padding_mask, pos)
 
 
 class TransformerDecoderLayer(nn.Module):
@@ -295,27 +284,6 @@ def build_transformer(args):
         normalize_before=args.pre_norm,
         return_intermediate_dec=True,
     )
-
-class FeatureResizer(nn.Module):
-    """
-    This class takes as input a set of embeddings of dimension C1 and outputs a set of
-    embedding of dimension C2, after a linear transformation, dropout and normalization (LN).
-    """
-
-    def __init__(self, input_feat_size, output_feat_size, dropout, do_ln=True):
-        super().__init__()
-        self.do_ln = do_ln
-        # Object feature encoding
-        self.fc = nn.Linear(input_feat_size, output_feat_size, bias=True)
-        self.layer_norm = nn.LayerNorm(output_feat_size, eps=1e-12)
-        self.dropout = nn.Dropout(dropout)
-
-    def forward(self, encoder_features):
-        x = self.fc(encoder_features)
-        if self.do_ln:
-            x = self.layer_norm(x)
-        output = self.dropout(x)
-        return output
 
 def _get_activation_fn(activation):
     """Return an activation function given a string"""

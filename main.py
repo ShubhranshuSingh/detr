@@ -210,10 +210,15 @@ def main(args):
             print('Did not find {}'.format(name))
             continue
     model.load_state_dict(own_state)
-    for param in model.named_parameters():
-        if param[0].find('encoder') == -1:
+    for param in model.transformer.named_parameters():
+        if param[0].find('decoder') == -1:
             param[1].requires_grad = False
-    model.query_embed.weight.requires_grad = True
+
+    for param in model.backbone.parameters():
+        param.requires_grad = False
+
+    for param in model.input_proj.parameters():
+        param.requires_grad = False
 
     writer = SummaryWriter('runs/detr/')
     for epoch in range(args.start_epoch, args.epochs):

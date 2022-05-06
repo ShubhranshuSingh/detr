@@ -37,6 +37,14 @@ class DETR(nn.Module):
         self.class_embed = nn.Linear(hidden_dim, num_classes + 1)
         self.bbox_embed = MLP(hidden_dim, hidden_dim, 4, 3)
         self.query_embed = nn.Embedding(num_queries, hidden_dim)
+        
+        self.expander_dropout = 0.1
+        self.resizer = FeatureResizer(
+            input_feat_size=768,
+            output_feat_size=hidden_dim,
+            dropout=self.expander_dropout,
+        )
+
         self.input_proj = nn.Conv2d(backbone.num_channels, hidden_dim, kernel_size=1)
         self.backbone = backbone
         self.aux_loss = aux_loss
@@ -62,7 +70,8 @@ class DETR(nn.Module):
 
         src, mask = features[-1].decompose()
         assert mask is not None
-        hs = self.transformer(self.input_proj(src), txt, mask, self.query_embed.weight, pos[-1])[0]
+        
+        hs = self.transformer(self.input_proj(src), mask, self.query_embed.weight, pos[-1], self.resizer(txt))[0]
 
         outputs_class = self.class_embed(hs)
         outputs_coord = self.bbox_embed(hs).sigmoid()
@@ -357,3 +366,25 @@ def build(args):
             postprocessors["panoptic"] = PostProcessPanoptic(is_thing_map, threshold=0.85)
 
     return model, criterion, postprocessors
+
+
+class FeatureResizer(nn.Module):
+    """
+    This class takes as input a set of embeddings of dimension C1 and outputs a set of
+    embedding of dimension C2, after a linear transformation, dropout and normalization (LN).
+    """
+
+    def __init__(self, input_feat_size, output_feat_size, dropout, do_ln=True):
+        super().__init__()
+        self.do_ln = do_ln
+        # Object feature encoding
+        self.fc = nn.Linear(input_feat_size, output_feat_size, bias=True)
+        self.layer_norm = nn.LayerNorm(output_feat_size, eps=1e-12)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, encoder_features):
+        x = self.fc(encoder_features)
+        if self.do_ln:
+            x = self.layer_norm(x)
+        output = self.dropout(x)
+        return output

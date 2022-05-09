@@ -191,6 +191,13 @@ def main(args):
 
     print("Start training")
     start_time = time.time()
+    
+    # Resume training
+    # chpt = torch.load(args.coco_path + 'logs/checkpoint_5.pth')
+    # model.load_state_dict(chpt['model'])
+    # optimizer.load_state_dict(chpt['optimizer'])
+    # lr_scheduler.load_state_dict(chpt['lr_scheduler'])
+
     weights = torch.load(args.coco_path + 'detr-r50-e632da11.pth')
     weights = weights['model']
     

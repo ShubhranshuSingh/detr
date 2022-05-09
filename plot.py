@@ -219,47 +219,49 @@ def main(args):
         targets = new_targets
 
         outputs = model(samples, txt)
-        if idx == 19: # Train ids - 15, 10, 21, 22 # Val ids 3, 7, 10
-            break
-    import matplotlib.pyplot as plt
-    import matplotlib.patches as patches
+        
+        import matplotlib.pyplot as plt
+        import matplotlib.patches as patches
 
     # Use patches.Rectangle - https://stackoverflow.com/questions/37435369/matplotlib-how-to-draw-a-rectangle-on-image
 
     # Use following variables to plot gt box and predicted box
     #img, masks = samples.decompose() # Read Nested Tensor class in utils/misc.py
-    i = 1
-    gt = targets[i]['boxes']
-    preds = outputs
+        i = 1
+        gt = targets[i]['boxes']
+        preds = outputs
 
-    image_id = targets[i]['image_id'].item() - 120624
-    file_name = annotations['images'][image_id]['file_name']
-    print('Question:', annotations['images'][image_id]['caption'])
+        image_id = targets[i]['image_id'].item() - 120624
+        file_name = annotations['images'][image_id]['file_name']
+        print(f'Question {idx}:', annotations['images'][image_id]['caption'])
 
     # import IPython
     # IPython.embed()
-    img = Image.open('/home/ubuntu/data/train2014/'+file_name)
+        img = Image.open('/home/ubuntu/data/train2014/'+file_name)
 
-    gt = gt[0].cpu().numpy()
-    h, w = targets[i]['orig_size'].cpu().numpy()
-    gt = gt*np.array([w, h , w, h])
-    lowx, lowy = (gt[0] - gt[2]/2, gt[1] - gt[3]/2)
-    r = patches.Rectangle((lowx, lowy), gt[2], gt[3], linewidth=1, edgecolor='r', facecolor='none')
-    fig, ax = plt.subplots()
-    ax.matshow(img)
-    ax.add_patch(r)
-    plt.savefig('out.png')
-    plt.cla()
+        gt = gt[0].cpu().numpy()
+        h, w = targets[i]['orig_size'].cpu().numpy()
+        gt = gt*np.array([w, h , w, h])
+        lowx, lowy = (gt[0] - gt[2]/2, gt[1] - gt[3]/2)
+        r = patches.Rectangle((lowx, lowy), gt[2], gt[3], linewidth=1, edgecolor='r', facecolor='none')
+        fig, ax = plt.subplots()
+        ax.matshow(img)
+        ax.add_patch(r)
+        plt.savefig(f'out_{idx}.png')
+        plt.close()
 
-    gt = preds['pred_boxes'][i]
-    gt = gt[0].detach().cpu().numpy()
-    gt = gt*np.array([w, h , w, h])
-    lowx, lowy = (gt[0] - gt[2]/2, gt[1] - gt[3]/2)
-    r = patches.Rectangle((lowx, lowy), gt[2], gt[3], linewidth=1, edgecolor='r', facecolor='none')
-    fig, ax = plt.subplots()
-    ax.matshow(img)
-    ax.add_patch(r)
-    plt.savefig('out_pred.png')
+        gt = preds['pred_boxes'][i]
+        gt = gt[0].detach().cpu().numpy()
+        gt = gt*np.array([w, h , w, h])
+        lowx, lowy = (gt[0] - gt[2]/2, gt[1] - gt[3]/2)
+        r = patches.Rectangle((lowx, lowy), gt[2], gt[3], linewidth=1, edgecolor='r', facecolor='none')
+        fig, ax = plt.subplots()
+        ax.matshow(img)
+        ax.add_patch(r)
+        plt.savefig(f'out_pred_{idx}.png')
+        plt.close()
+        if idx == 21: # Train ids - 15, 10, 21, 22 # Val ids 3, 7, 10
+            break
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser('DETR training and evaluation script', parents=[get_args_parser()])
